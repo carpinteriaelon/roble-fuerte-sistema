@@ -1,0 +1,14 @@
+# Dependências Node.js (podem ser reinstaladas com npm install)
+node_modules/
+
+# Arquivos de lock temporário do Excel/LibreOffice
+.~lock.*
+
+# Arquivos temporários do Windows
+Thumbs.db
+desktop.ini
+*.tmp
+*.temp
+
+# Arquivos de upload temporários
+08_DOCUMENTOS/Uploads/

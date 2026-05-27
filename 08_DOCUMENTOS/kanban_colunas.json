@@ -1,0 +1,22 @@
+[
+  {
+    "status": "Aprovado",
+    "label": "OBRA",
+    "color": "#F59E0B"
+  },
+  {
+    "status": "Produção",
+    "label": "A FAZER",
+    "color": "#3B82F6"
+  },
+  {
+    "status": "Lacado",
+    "label": "FAZENDO",
+    "color": "#8B5CF6"
+  },
+  {
+    "status": "Montagem",
+    "label": "FEITO",
+    "color": "#10B981"
+  }
+]

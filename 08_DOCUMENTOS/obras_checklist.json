@@ -1,0 +1,88 @@
+{
+  "P-004": {
+    "Compra de Materiais": false,
+    "Compra de Ferragens": false,
+    "Compra de Materiais::Madeira": false,
+    "_estrutura": {
+      "Compra de Materiais": [
+        "Interior Spiga sal",
+        "Melamina blanco"
+      ],
+      "Compra de Ferragens": [
+        "Zapatero giratorio",
+        "KIt de puertas correderas en aluminio",
+        "Espejo das puertas correderas do armario pasilo",
+        "Pantalon extraible"
+      ],
+      "Compra de Laca": [
+        "Laca 9010"
+      ]
+    },
+    "Compra de Ferragens::Zapatero giratorio": true,
+    "Compra de Materiais::Interior Spiga sal": true,
+    "Compra de Materiais::Melamina blanco": true,
+    "_notas": "*Tema das facturas, quando eu for fazer  a proxima factura tenho que descontar 200 euros. ",
+    "_valorFactura": "7527",
+    "_valorAdelanto": "3863.50"
+  },
+  "P-008": {
+    "_estrutura": {},
+    "_acoes": [
+      "FABRICAR PUERTAS CORREDERAS EN MALAMINA ",
+      ""
+    ],
+    "_notas": "-Interior spiga sal\n-as puertas correderas da derecha ten spejo\n"
+  },
+  "P-016": {
+    "_notas": ""
+  },
+  "P-012": {
+    "_notas": "-",
+    "_estrutura": {
+      "Compra de Materiais": [
+        "Comprar madera maciza"
+      ],
+      "Compra de Laca": [
+        "Confirmar Laca blanca"
+      ]
+    },
+    "_valorFactura": "17255.81",
+    "_valorAdelanto": "5000"
+  },
+  "P-002": {
+    "_acoes": [
+      "FABRICAR ARMARIOS ",
+      ""
+    ],
+    "_notas": "-Interior spiga sal\n-Pantalon extraible"
+  },
+  "P-005": {
+    "_notas": "-Interior spiga sal \n-",
+    "_acoes": [
+      ""
+    ]
+  },
+  "P-028": {
+    "_estrutura": {
+      "Compra de Materiais": [
+        "Interior Lino",
+        "DM puertas"
+      ],
+      "Compra de Ferragens": [
+        "Dobradiças",
+        "Puxadores",
+        "Corrediças"
+      ],
+      "Compra de Laca": [
+        "Laca",
+        "Primário",
+        "Diluente"
+      ]
+    },
+    "Compra de Materiais::Interior Lino": true,
+    "Compra de Materiais::MDF": true,
+    "_valorFactura": "28047.80",
+    "_valorAdelanto": "6954",
+    "_notas": "-Sobre la factura foi ingressado 30% de la factura."
+  }
+}

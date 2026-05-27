@@ -1,0 +1,209 @@
+{
+  "tarefas": [
+    {
+      "id": "1779721379934",
+      "obraId": "P-004",
+      "nome": "ARMARIO HAB PRINCIPAL",
+      "status": "Produção",
+      "acoes": [
+        "FABRICACIÓN DE INTERIOR",
+        "FABRICACIÓN DE PUERTAS"
+      ],
+      "notas": "-Puertas Correderas en melamina blanca\n-Laca 9010"
+    },
+    {
+      "id": "1779721383260",
+      "obraId": "P-004",
+      "nome": "ARMARIO ROPA BLANCA",
+      "status": "Produção",
+      "acoes": [
+        "FABRICACIÓN DE INTERIOR",
+        "FABRICACIÓN DE PUERTA ABATIBLE"
+      ],
+      "notas": "-Laca 9010"
+    },
+    {
+      "id": "1779721611056",
+      "obraId": "P-004",
+      "nome": "ARMARIO PASILLO",
+      "status": "Produção",
+      "acoes": [
+        "FABRICACIÓN DE INTERIOR",
+        "FABRICACIÓN DE PUERTAS CORREDERAS"
+      ],
+      "notas": "-Puertas Correderas en melamina blanca\n-Laca 9010"
+    },
+    {
+      "id": "1779722189369",
+      "obraId": "P-012",
+      "nome": "ARMARIO A1",
+      "status": "Produção",
+      "acoes": [
+        "FABRICACIÓN DE INTERIOR",
+        "FABRICACIÓN DE PUERTAS",
+        ""
+      ],
+      "notas": ""
+    },
+    {
+      "id": "1779723463436",
+      "obraId": "P-012",
+      "nome": "",
+      "status": "Lacado",
+      "acoes": [],
+      "notas": ""
+    },
+    {
+      "id": "1779778893286",
+      "obraId": "P-012",
+      "nome": "ARMARIO A2/A3",
+      "status": "Produção",
+      "acoes": [
+        "FABRICACIÓN DE INTERIOR"
+      ],
+      "notas": "-No hay puertas"
+    },
+    {
+      "id": "1779778922021",
+      "obraId": "P-012",
+      "nome": "ARMARIO A4",
+      "status": "Produção",
+      "acoes": [
+        "FABRICACIÓN DE INTERIOR",
+        "FABRICACIÓN DE PUERTAS"
+      ],
+      "notas": ""
+    },
+    {
+      "id": "1779778942225",
+      "obraId": "P-012",
+      "nome": "ARMARIO A5",
+      "status": "Produção",
+      "acoes": [
+        "FABRICACIÓN DE INTERIOR",
+        "FABRICACIÓN DE PUERTAS"
+      ],
+      "notas": ""
+    },
+    {
+      "id": "1779778984447",
+      "obraId": "P-012",
+      "nome": "ARMARIO A6",
+      "status": "Produção",
+      "acoes": [
+        "FABRICACIÓN DE PUERTAS ",
+        "FABRICACIÓN DE ARMARIOS"
+      ],
+      "notas": ""
+    },
+    {
+      "id": "1779779290147",
+      "obraId": "P-004",
+      "nome": "EMMA - PUERTAS/BALDAS/MALETERO",
+      "status": "Produção",
+      "acoes": [
+        "FABRICACIÓN DE PUERTAS CORREDERAS HASTA  TECHO",
+        ""
+      ],
+      "notas": ""
+    },
+    {
+      "id": "1779779518080",
+      "obraId": "P-004",
+      "nome": "ELISA - PUERTAS NUEVAS ",
+      "status": "Produção",
+      "acoes": [
+        "FABRICACIÓN DE PUERTAS CORREDERAS"
+      ],
+      "notas": ""
+    },
+    {
+      "id": "1779780386256",
+      "obraId": "P-028",
+      "nome": "ARMARIO A1",
+      "status": "Produção",
+      "acoes": [
+        "FABRICACIÓN DE INTERIOR ",
+        "FABRICACIÓN DE PUERTAS"
+      ],
+      "notas": ""
+    },
+    {
+      "id": "1779783234291",
+      "obraId": "P-028",
+      "nome": "ARMARIO A2",
+      "status": "Produção",
+      "acoes": [
+        "FABRICACIÓN DE INTERIOR ",
+        "FABRICACIÓN DE PUERTAS"
+      ],
+      "notas": ""
+    },
+    {
+      "id": "1779783257776",
+      "obraId": "P-028",
+      "nome": "ARMARIO A3",
+      "status": "Produção",
+      "acoes": [
+        "FABRICACIÓN DE INTERIOR ",
+        "FABRICACIÓN DE PUERTAS"
+      ],
+      "notas": ""
+    },
+    {
+      "id": "1779783283169",
+      "obraId": "P-028",
+      "nome": "ARMARIO A4",
+      "status": "Produção",
+      "acoes": [
+        "FABRICACIÓN DE INTERIOR ",
+        "FABRICACIÓN DE PUERTAS"
+      ],
+      "notas": ""
+    },
+    {
+      "id": "1779783361957",
+      "obraId": "P-028",
+      "nome": "ARMARIO A5",
+      "status": "Produção",
+      "acoes": [
+        "FABRICACIÓN DE INTERIOR ",
+        "FABRICACIÓN DE PUERTAS"
+      ],
+      "notas": ""
+    },
+    {
+      "id": "1779783404878",
+      "obraId": "P-028",
+      "nome": "ARMARIO A6",
+      "status": "Produção",
+      "acoes": [
+        "FABRICACIÓN DE INTERIOR ",
+        "FABRICACIÓN DE PUERTAS"
+      ],
+      "notas": ""
+    },
+    {
+      "id": "1779783439244",
+      "obraId": "P-028",
+      "nome": "ARMARIO A7",
+      "status": "Produção",
+      "acoes": [
+        "FABRICACIÓN DE INTERIOR ",
+        "FABRICACIÓN DE PUERTAS"
+      ],
+      "notas": ""
+    },
+    {
+      "id": "1779783594164",
+      "obraId": "P-028",
+      "nome": "ARMARIO A8/A9/A9 SIN PUERTAS",
+      "status": "Produção",
+      "acoes": [
+        "FABRICACIÓN DE INTERIOR ",
+        "FABRICACIÓN DE PUERTAS"
+      ],
+      "notas": ""
+    }
+  ]
+}
