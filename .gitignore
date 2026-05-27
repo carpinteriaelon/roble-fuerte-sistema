@@ -12,3 +12,7 @@ desktop.ini
 
 # Arquivos de upload temporários
 08_DOCUMENTOS/Uploads/
+
+# Credenciais privadas — NUNCA enviar para o GitHub
+google-credentials.json
+*.json.key

@@ -1,49 +1,87 @@
-const express = require('express');
-const xlsx    = require('xlsx');
-const path    = require('path');
-const multer  = require('multer');
-const fs      = require('fs');
+const express  = require('express');
+const path     = require('path');
+const multer   = require('multer');
+const fs       = require('fs');
+const xlsx     = require('xlsx');
+const { google } = require('googleapis');
 
 const app  = express();
-const PORT = 3000;
-const BASE = path.join(__dirname, '..');
+const PORT = process.env.PORT || 3000;
+
+const DATA_DIR = process.env.DATA_DIR
+  ? path.resolve(process.env.DATA_DIR)
+  : path.join(__dirname, '..', '08_DOCUMENTOS');
 
 app.use(express.static(__dirname));
 app.use(express.json());
 
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'Dashboard_Executivo.html'));
-});
+// ── Google Sheets ───────────────────────────────────────
+const SHEET_IDS = {
+  cadastros:  process.env.SHEET_CADASTROS  || '1JIiOfyHLjp1FjmGU7-WbTuwcAVNsJOs9WDzC96GtbTA',
+  financeiro: process.env.SHEET_FINANCEIRO || '1U901mB-lgeR73MDoBOtZmn-BDVfGSzpWQfyzbhUf5BE',
+  producao:   process.env.SHEET_PRODUCAO   || '1o2hM-xBxPQjg3piEi76KFfIsMezV5sGaJVs8y7WO-o8',
+  obras:      process.env.SHEET_OBRAS      || '1UFsrTbNbZR2a2EG2TdttFUIwKsd0RLNwT1wNS2Zi2_M',
+};
 
-function lerSheet(ws) {
-  const raw = xlsx.utils.sheet_to_json(ws, { header: 1, defval: '' });
+let _sheetsClient;
+function getSheetsClient() {
+  if (!_sheetsClient) {
+    const creds = process.env.GOOGLE_CREDENTIALS
+      ? JSON.parse(process.env.GOOGLE_CREDENTIALS)
+      : require('./google-credentials.json');
+    const auth = new google.auth.GoogleAuth({
+      credentials: creds,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
+    _sheetsClient = google.sheets({ version: 'v4', auth });
+  }
+  return _sheetsClient;
+}
 
-  // Procura cabeçalho nas primeiras 12 linhas; tenta limiar 4, depois 3
+function tryNum(v) {
+  if (v === '' || v === null || v === undefined) return '';
+  if (typeof v === 'number') return v;
+  const s = String(v).trim();
+  if (s === '') return '';
+  const euro = s.replace(/\./g, '').replace(',', '.');
+  const n = parseFloat(euro);
+  if (!isNaN(n) && /^-?[\d.,]+$/.test(s)) return n;
+  return v;
+}
+
+function lerSheetFromValues(raw) {
+  if (!raw || !raw.length) return { resumo: {}, dados: [] };
+
+  const maxLen = Math.max(...raw.map(r => r.length));
+  const rows = raw.map(r => {
+    const padded = [...r];
+    while (padded.length < maxLen) padded.push('');
+    return padded;
+  });
+
   let headerIdx = -1;
   for (const limiar of [4, 3]) {
-    for (let i = 0; i < Math.min(raw.length, 12); i++) {
-      const strings = raw[i].filter(c => typeof c === 'string' && c.trim() !== '');
+    for (let i = 0; i < Math.min(rows.length, 12); i++) {
+      const strings = rows[i].filter(c => typeof c === 'string' && c.trim() !== '');
       if (strings.length >= limiar) { headerIdx = i; break; }
     }
     if (headerIdx !== -1) break;
   }
 
-  // Extrai resumo das linhas antes do cabeçalho (pares "Rótulo: valor_numérico")
   const resumo = {};
-  for (let i = 0; i < (headerIdx === -1 ? raw.length : headerIdx); i++) {
-    const row = raw[i];
+  for (let i = 0; i < (headerIdx === -1 ? rows.length : headerIdx); i++) {
+    const row = rows[i];
     for (let j = 0; j < row.length - 1; j++) {
       const label = String(row[j] || '').trim().replace(/:$/, '');
-      const valor = row[j + 1];
+      const valor = tryNum(row[j + 1]);
       if (label && typeof valor === 'number') resumo[label] = valor;
     }
   }
 
   if (headerIdx === -1) return { resumo, dados: [] };
 
-  // Monta cabeçalhos: nomeia col vazia após IVA como TOTAL, ignora duplicados
   const seen = new Set();
-  const cabecalhos = raw[headerIdx].map((h, i, arr) => {
+  const cabecalhos = rows[headerIdx].map((h, i, arr) => {
     let s = String(h || '').trim();
     if (!s) {
       const prev = String(arr[i - 1] || '').trim();
@@ -60,6 +98,92 @@ function lerSheet(ws) {
   });
 
   const dados = [];
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.every(c => c === '' || c == null)) continue;
+    const obj = {};
+    cabecalhos.forEach((h, j) => { if (h) obj[h] = tryNum(row[j] ?? ''); });
+    if (Object.values(obj).some(v => v !== '')) dados.push(obj);
+  }
+
+  return { resumo, dados };
+}
+
+const _gsCache = {};
+const CACHE_TTL = 60 * 1000;
+
+async function lerGoogleSheet(spreadsheetId) {
+  const now = Date.now();
+  if (_gsCache[spreadsheetId] && (now - _gsCache[spreadsheetId].time) < CACHE_TTL) {
+    return _gsCache[spreadsheetId].dados;
+  }
+  const sheets = getSheetsClient();
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  const sheetNames = meta.data.sheets.map(s => s.properties.title);
+  const resultado = {};
+  for (const nome of sheetNames) {
+    try {
+      const resp = await sheets.spreadsheets.values.get({ spreadsheetId, range: nome });
+      resultado[nome] = lerSheetFromValues(resp.data.values || []);
+    } catch {
+      resultado[nome] = { resumo: {}, dados: [] };
+    }
+  }
+  _gsCache[spreadsheetId] = { time: now, dados: resultado };
+  return resultado;
+}
+
+function colToLetter(col) {
+  let letter = '';
+  col++;
+  while (col > 0) {
+    const rem = (col - 1) % 26;
+    letter = String.fromCharCode(65 + rem) + letter;
+    col = Math.floor((col - 1) / 26);
+  }
+  return letter;
+}
+
+// ── Excel local (uploads de fechamento/extrato) ─────────
+const _xlsxCache = {};
+
+function lerSheet(ws) {
+  const raw = xlsx.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  let headerIdx = -1;
+  for (const limiar of [4, 3]) {
+    for (let i = 0; i < Math.min(raw.length, 12); i++) {
+      const strings = raw[i].filter(c => typeof c === 'string' && c.trim() !== '');
+      if (strings.length >= limiar) { headerIdx = i; break; }
+    }
+    if (headerIdx !== -1) break;
+  }
+  const resumo = {};
+  for (let i = 0; i < (headerIdx === -1 ? raw.length : headerIdx); i++) {
+    const row = raw[i];
+    for (let j = 0; j < row.length - 1; j++) {
+      const label = String(row[j] || '').trim().replace(/:$/, '');
+      const valor = row[j + 1];
+      if (label && typeof valor === 'number') resumo[label] = valor;
+    }
+  }
+  if (headerIdx === -1) return { resumo, dados: [] };
+  const seen = new Set();
+  const cabecalhos = raw[headerIdx].map((h, i, arr) => {
+    let s = String(h || '').trim();
+    if (!s) {
+      const prev = String(arr[i - 1] || '').trim();
+      if (/iva|tax/i.test(prev) && !seen.has('TOTAL')) s = 'TOTAL';
+      else return '';
+    }
+    if (seen.has(s)) {
+      const s2 = s + '_2';
+      if (!seen.has(s2)) { seen.add(s2); return s2; }
+      return '';
+    }
+    seen.add(s);
+    return s;
+  });
+  const dados = [];
   for (let i = headerIdx + 1; i < raw.length; i++) {
     const row = raw[i];
     if (row.every(c => c === '' || c == null)) continue;
@@ -67,25 +191,27 @@ function lerSheet(ws) {
     cabecalhos.forEach((h, j) => { if (h) obj[h] = row[j] ?? ''; });
     if (Object.values(obj).some(v => v !== '')) dados.push(obj);
   }
-
   return { resumo, dados };
 }
-
-const _cache = {};
 
 function lerExcel(caminhoArquivo) {
   try {
     const mtime = fs.statSync(caminhoArquivo).mtimeMs;
-    if (_cache[caminhoArquivo]?.mtime === mtime) return _cache[caminhoArquivo].dados;
+    if (_xlsxCache[caminhoArquivo]?.mtime === mtime) return _xlsxCache[caminhoArquivo].dados;
     const wb = xlsx.readFile(caminhoArquivo);
     const resultado = {};
     wb.SheetNames.forEach(nome => { resultado[nome] = lerSheet(wb.Sheets[nome]); });
-    _cache[caminhoArquivo] = { mtime, dados: resultado };
+    _xlsxCache[caminhoArquivo] = { mtime, dados: resultado };
     return resultado;
   } catch (e) {
     return { erro: e.message };
   }
 }
+
+// ── Routes ──────────────────────────────────────────────
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'Dashboard_Executivo.html'));
+});
 
 const MESES_RE = {
   JANEIRO:   /jan|ene/i,
@@ -108,6 +234,9 @@ function detectarMes(filename) {
   }
   return null;
 }
+
+const pastaUploads = path.join(DATA_DIR, 'Uploads');
+if (!fs.existsSync(pastaUploads)) fs.mkdirSync(pastaUploads, { recursive: true });
 
 app.get('/api/fechamento', (req, res) => {
   const arquivos = fs.readdirSync(pastaUploads)
@@ -132,54 +261,55 @@ app.get('/api/extrato', (req, res) => {
   res.json(resultado);
 });
 
-app.get('/api/financeiro', (req, res) => {
-  res.json(lerExcel(path.join(BASE, '01_FINANCEIRO', 'Controle_Financeiro_Master.xlsx')));
+app.get('/api/financeiro', async (req, res) => {
+  try { res.json(await lerGoogleSheet(SHEET_IDS.financeiro)); }
+  catch (e) { res.status(500).json({ erro: e.message }); }
 });
 
-app.get('/api/obras', (req, res) => {
-  res.json(lerExcel(path.join(BASE, '02_OBRAS', 'CRM_Projetos.xlsx')));
+app.get('/api/obras', async (req, res) => {
+  try { res.json(await lerGoogleSheet(SHEET_IDS.obras)); }
+  catch (e) { res.status(500).json({ erro: e.message }); }
 });
 
-app.put('/api/obra-campo', express.json(), (req, res) => {
+app.put('/api/obra-campo', async (req, res) => {
   const { id, campo, valor } = req.body || {};
   if (!id || !campo) return res.status(400).json({ erro: 'id e campo obrigatórios' });
   try {
-    const filePath = path.join(BASE, '02_OBRAS', 'CRM_Projetos.xlsx');
-    const wb = xlsx.readFile(filePath);
-    const ws = wb.Sheets['Pipeline'];
-    const rows = xlsx.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    const sheets = getSheetsClient();
+    const spreadsheetId = SHEET_IDS.obras;
+    const resp = await sheets.spreadsheets.values.get({ spreadsheetId, range: 'Pipeline' });
+    const rows = resp.data.values || [];
     const headerRow = rows.findIndex(r => r.includes('ID'));
     if (headerRow === -1) return res.status(500).json({ erro: 'Cabeçalho não encontrado' });
     const headers = rows[headerRow];
-    const colIdx  = headers.indexOf(campo);
+    const colIdx = headers.indexOf(campo);
     if (colIdx === -1) return res.status(400).json({ erro: `Campo "${campo}" não existe` });
     const dataRowIdx = rows.findIndex((r, i) => i > headerRow && r[0] === id);
     if (dataRowIdx === -1) return res.status(404).json({ erro: `ID "${id}" não encontrado` });
-    const cellAddr = xlsx.utils.encode_cell({ r: dataRowIdx, c: colIdx });
-    ws[cellAddr] = { t: 's', v: valor };
-    xlsx.writeFile(wb, filePath);
-    delete _cache[filePath];
+    const range = `Pipeline!${colToLetter(colIdx)}${dataRowIdx + 1}`;
+    await sheets.spreadsheets.values.update({
+      spreadsheetId, range, valueInputOption: 'USER_ENTERED',
+      resource: { values: [[valor]] },
+    });
+    delete _gsCache[spreadsheetId];
     res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ erro: e.message });
-  }
+  } catch (e) { res.status(500).json({ erro: e.message }); }
 });
 
-app.get('/api/producao', (req, res) => {
-  res.json(lerExcel(path.join(BASE, '05_PRODUCAO', 'Producao_Funcionarios.xlsx')));
+app.get('/api/producao', async (req, res) => {
+  try { res.json(await lerGoogleSheet(SHEET_IDS.producao)); }
+  catch (e) { res.status(500).json({ erro: e.message }); }
 });
 
-app.get('/api/cadastros', (req, res) => {
-  res.json(lerExcel(path.join(BASE, '00_Cadastros_Mestres.xlsx')));
+app.get('/api/cadastros', async (req, res) => {
+  try { res.json(await lerGoogleSheet(SHEET_IDS.cadastros)); }
+  catch (e) { res.status(500).json({ erro: e.message }); }
 });
 
 // ── Upload de arquivos Excel ────────────────────────────
-const pastaUploads = path.join(BASE, '08_DOCUMENTOS', 'Uploads');
-if (!fs.existsSync(pastaUploads)) fs.mkdirSync(pastaUploads, { recursive: true });
-
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, pastaUploads),
-  filename:    (req, file, cb) => {
+  filename: (req, file, cb) => {
     const ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const nome = Buffer.from(file.originalname, 'latin1').toString('utf8');
     cb(null, ts + '_' + nome);
@@ -197,7 +327,6 @@ const upload = multer({
 
 app.post('/api/upload', upload.single('arquivo'), (req, res) => {
   if (!req.file) return res.status(400).json({ erro: 'Arquivo não recebido ou tipo não permitido.' });
-
   const resposta = {
     ok: true,
     nome: req.file.originalname,
@@ -205,18 +334,15 @@ app.post('/api/upload', upload.single('arquivo'), (req, res) => {
     pasta: pastaUploads,
     tamanho: (req.file.size / 1024).toFixed(1) + ' KB'
   };
-
-  // Se for Excel, retorna prévia dos dados
   if (/\.(xlsx|xls)$/i.test(req.file.originalname)) {
     resposta.previa = lerExcel(req.file.path);
   }
-
   res.json(resposta);
 });
 
 app.get('/api/ler-upload/:nome', (req, res) => {
   const arquivo = path.join(pastaUploads, req.params.nome);
-  if (!require('fs').existsSync(arquivo)) return res.status(404).json({ erro: 'Não encontrado' });
+  if (!fs.existsSync(arquivo)) return res.status(404).json({ erro: 'Não encontrado' });
   res.json(lerExcel(arquivo));
 });
 
@@ -230,8 +356,8 @@ app.get('/api/uploads', (req, res) => {
   } catch { res.json([]); }
 });
 
-// ── Documentos de Obras (Presupuesto / Projeto) ─────────
-const pastaObras = path.join(BASE, '08_DOCUMENTOS', 'Obras');
+// ── Documentos de Obras ─────────────────────────────────
+const pastaObras = path.join(DATA_DIR, 'Obras');
 if (!fs.existsSync(pastaObras)) fs.mkdirSync(pastaObras, { recursive: true });
 
 const storageObra = multer.diskStorage({
@@ -277,8 +403,56 @@ app.delete('/api/obra-doc/:nome', (req, res) => {
   res.json({ ok: true });
 });
 
-// ── Checklist de Obras ─────────────────────────────────
-const CHECKLIST_FILE = path.join(BASE, '08_DOCUMENTOS', 'obras_checklist.json');
+// ── Obras CRUD ──────────────────────────────────────────
+app.delete('/api/obra/:id', async (req, res) => {
+  try {
+    const sheets = getSheetsClient();
+    const spreadsheetId = SHEET_IDS.obras;
+    const resp = await sheets.spreadsheets.values.get({ spreadsheetId, range: 'Pipeline' });
+    const rows = resp.data.values || [];
+    const headerRow = rows.findIndex(r => r.includes('ID'));
+    if (headerRow === -1) return res.status(500).json({ erro: 'Cabeçalho não encontrado' });
+    const dataRowIdx = rows.findIndex((r, i) => i > headerRow && String(r[0]) === req.params.id);
+    if (dataRowIdx === -1) return res.status(404).json({ erro: 'ID não encontrado' });
+    const meta = await sheets.spreadsheets.get({ spreadsheetId });
+    const pipelineSheet = meta.data.sheets.find(s => s.properties.title === 'Pipeline');
+    const sheetId = pipelineSheet.properties.sheetId;
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      resource: { requests: [{ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: dataRowIdx, endIndex: dataRowIdx + 1 } } }] },
+    });
+    delete _gsCache[spreadsheetId];
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ erro: e.message }); }
+});
+
+app.post('/api/obra', async (req, res) => {
+  try {
+    const sheets = getSheetsClient();
+    const spreadsheetId = SHEET_IDS.obras;
+    const resp = await sheets.spreadsheets.values.get({ spreadsheetId, range: 'Pipeline' });
+    const rows = resp.data.values || [];
+    const headerRow = rows.findIndex(r => r.includes('ID'));
+    if (headerRow === -1) return res.status(500).json({ erro: 'Cabeçalho não encontrado' });
+    const headers = rows[headerRow];
+    const existingIds = rows.slice(headerRow + 1)
+      .map(r => String(r[0] || ''))
+      .filter(id => /^P-\d+$/.test(id))
+      .map(id => parseInt(id.slice(2)));
+    const nextNum = existingIds.length ? Math.max(...existingIds) + 1 : 1;
+    const newId = `P-${String(nextNum).padStart(3, '0')}`;
+    const newRow = headers.map((h, i) => i === 0 ? newId : (req.body[String(h)] ?? ''));
+    await sheets.spreadsheets.values.append({
+      spreadsheetId, range: 'Pipeline', valueInputOption: 'USER_ENTERED',
+      resource: { values: [newRow] },
+    });
+    delete _gsCache[spreadsheetId];
+    res.json({ ok: true, id: newId });
+  } catch (e) { res.status(500).json({ erro: e.message }); }
+});
+
+// ── Checklist de Obras ──────────────────────────────────
+const CHECKLIST_FILE = path.join(DATA_DIR, 'obras_checklist.json');
 
 function lerChecklist() {
   try {
@@ -289,7 +463,7 @@ function lerChecklist() {
 
 app.get('/api/obras-checklist', (req, res) => res.json(lerChecklist()));
 
-app.put('/api/obras-checklist/:id/notas', express.json(), (req, res) => {
+app.put('/api/obras-checklist/:id/notas', (req, res) => {
   const { notas } = req.body || {};
   if (notas === undefined) return res.status(400).json({ erro: 'notas obrigatório' });
   const data = lerChecklist();
@@ -299,7 +473,7 @@ app.put('/api/obras-checklist/:id/notas', express.json(), (req, res) => {
   res.json({ ok: true });
 });
 
-app.put('/api/obras-checklist/:id/acoes', express.json(), (req, res) => {
+app.put('/api/obras-checklist/:id/acoes', (req, res) => {
   const { acoes } = req.body || {};
   if (!Array.isArray(acoes)) return res.status(400).json({ erro: 'acoes deve ser array' });
   const data = lerChecklist();
@@ -309,7 +483,7 @@ app.put('/api/obras-checklist/:id/acoes', express.json(), (req, res) => {
   res.json({ ok: true });
 });
 
-app.put('/api/obras-checklist/:id/estrutura', express.json(), (req, res) => {
+app.put('/api/obras-checklist/:id/estrutura', (req, res) => {
   const { estrutura } = req.body || {};
   if (!estrutura) return res.status(400).json({ erro: 'estrutura obrigatória' });
   const data = lerChecklist();
@@ -319,7 +493,7 @@ app.put('/api/obras-checklist/:id/estrutura', express.json(), (req, res) => {
   res.json({ ok: true });
 });
 
-app.put('/api/obras-checklist/:id', express.json(), (req, res) => {
+app.put('/api/obras-checklist/:id', (req, res) => {
   const { item, checked } = req.body || {};
   if (!item) return res.status(400).json({ erro: 'item obrigatório' });
   const data = lerChecklist();
@@ -329,7 +503,7 @@ app.put('/api/obras-checklist/:id', express.json(), (req, res) => {
   res.json({ ok: true });
 });
 
-app.put('/api/obras-checklist/:id/financeiro', express.json(), (req, res) => {
+app.put('/api/obras-checklist/:id/financeiro', (req, res) => {
   const { campo, valor } = req.body || {};
   if (!campo) return res.status(400).json({ erro: 'campo obrigatório' });
   const data = lerChecklist();
@@ -340,7 +514,7 @@ app.put('/api/obras-checklist/:id/financeiro', express.json(), (req, res) => {
 });
 
 // ── Facturas de Giro ────────────────────────────────────
-const GIRO_FILE = path.join(BASE, '08_DOCUMENTOS', 'facturas_giro.json');
+const GIRO_FILE = path.join(DATA_DIR, 'facturas_giro.json');
 
 function lerGiro() {
   try {
@@ -385,83 +559,31 @@ app.delete('/api/giro/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-// ── Colunas Kanban ─────────────────────────────────────
-const KANBAN_COLUNAS_FILE = path.join(BASE, '08_DOCUMENTOS', 'kanban_colunas.json');
+// ── Colunas Kanban ──────────────────────────────────────
+const KANBAN_COLUNAS_FILE = path.join(DATA_DIR, 'kanban_colunas.json');
 const DEFAULT_COLUNAS = [
   { status: 'Aprovado', label: 'OBRA',    color: '#F59E0B' },
   { status: 'Produção', label: 'A FAZER', color: '#3B82F6' },
   { status: 'Lacado',   label: 'FAZENDO', color: '#8B5CF6' },
   { status: 'Montagem', label: 'FEITO',   color: '#10B981' },
 ];
+
 function lerKanbanColunas() {
   try {
     if (!fs.existsSync(KANBAN_COLUNAS_FILE)) return DEFAULT_COLUNAS;
     return JSON.parse(fs.readFileSync(KANBAN_COLUNAS_FILE, 'utf8'));
   } catch { return DEFAULT_COLUNAS; }
 }
+
 app.get('/api/kanban-colunas', (req, res) => res.json(lerKanbanColunas()));
-app.put('/api/kanban-colunas', express.json(), (req, res) => {
+app.put('/api/kanban-colunas', (req, res) => {
   if (!Array.isArray(req.body)) return res.status(400).json({ erro: 'array esperado' });
   fs.writeFileSync(KANBAN_COLUNAS_FILE, JSON.stringify(req.body, null, 2), 'utf8');
   res.json({ ok: true });
 });
 
-// ── Obras CRUD ─────────────────────────────────────────
-app.delete('/api/obra/:id', (req, res) => {
-  try {
-    const filePath = path.join(BASE, '02_OBRAS', 'CRM_Projetos.xlsx');
-    const wb = xlsx.readFile(filePath);
-    const ws = wb.Sheets['Pipeline'];
-    const rows = xlsx.utils.sheet_to_json(ws, { header: 1, defval: '' });
-    const headerRow = rows.findIndex(r => r.includes('ID'));
-    if (headerRow === -1) return res.status(500).json({ erro: 'Cabeçalho não encontrado' });
-    const dataRowIdx = rows.findIndex((r, i) => i > headerRow && String(r[0]) === req.params.id);
-    if (dataRowIdx === -1) return res.status(404).json({ erro: `ID não encontrado` });
-    rows.splice(dataRowIdx, 1);
-    const newWs = xlsx.utils.aoa_to_sheet(rows);
-    if (ws['!cols']) newWs['!cols'] = ws['!cols'];
-    wb.Sheets['Pipeline'] = newWs;
-    xlsx.writeFile(wb, filePath);
-    delete _cache[filePath];
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ erro: e.message });
-  }
-});
-
-app.post('/api/obra', express.json(), (req, res) => {
-  try {
-    const filePath = path.join(BASE, '02_OBRAS', 'CRM_Projetos.xlsx');
-    const wb = xlsx.readFile(filePath);
-    const ws = wb.Sheets['Pipeline'];
-    const rows = xlsx.utils.sheet_to_json(ws, { header: 1, defval: '' });
-    const headerRow = rows.findIndex(r => r.includes('ID'));
-    if (headerRow === -1) return res.status(500).json({ erro: 'Cabeçalho não encontrado' });
-    const headers = rows[headerRow];
-    const existingIds = rows.slice(headerRow + 1)
-      .map(r => String(r[0] || ''))
-      .filter(id => /^P-\d+$/.test(id))
-      .map(id => parseInt(id.slice(2)));
-    const nextNum = existingIds.length ? Math.max(...existingIds) + 1 : 1;
-    const newId = `P-${String(nextNum).padStart(3, '0')}`;
-    const newRow = headers.map((h, i) => {
-      if (i === 0) return newId;
-      return req.body[String(h)] !== undefined ? req.body[String(h)] : '';
-    });
-    rows.push(newRow);
-    const newWs = xlsx.utils.aoa_to_sheet(rows);
-    if (ws['!cols']) newWs['!cols'] = ws['!cols'];
-    wb.Sheets['Pipeline'] = newWs;
-    xlsx.writeFile(wb, filePath);
-    delete _cache[filePath];
-    res.json({ ok: true, id: newId });
-  } catch (e) {
-    res.status(500).json({ erro: e.message });
-  }
-});
-
-// ── Tarefas Kanban (móveis por cliente) ─────────────────
-const TAREFAS_FILE = path.join(BASE, '08_DOCUMENTOS', 'tarefas_kanban.json');
+// ── Tarefas Kanban ──────────────────────────────────────
+const TAREFAS_FILE = path.join(DATA_DIR, 'tarefas_kanban.json');
 
 function lerTarefas() {
   try {
@@ -476,7 +598,7 @@ function gravarTarefas(data) {
 
 app.get('/api/tarefas', (req, res) => res.json(lerTarefas()));
 
-app.post('/api/tarefas', express.json(), (req, res) => {
+app.post('/api/tarefas', (req, res) => {
   const { obraId, nome, status } = req.body || {};
   if (!obraId || !status) return res.status(400).json({ erro: 'obraId e status obrigatórios' });
   const data = lerTarefas();
@@ -486,7 +608,7 @@ app.post('/api/tarefas', express.json(), (req, res) => {
   res.json({ ok: true, tarefa: t });
 });
 
-app.put('/api/tarefas/:id', express.json(), (req, res) => {
+app.put('/api/tarefas/:id', (req, res) => {
   const data = lerTarefas();
   const idx = data.tarefas.findIndex(t => t.id === req.params.id);
   if (idx === -1) return res.status(404).json({ erro: 'Não encontrado' });
@@ -502,8 +624,8 @@ app.delete('/api/tarefas/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-// ── Pagamentos de Funcionários ─────────────────────────
-const PAGAMENTOS_FILE = path.join(BASE, '08_DOCUMENTOS', 'pagamentos_func.json');
+// ── Pagamentos de Funcionários ──────────────────────────
+const PAGAMENTOS_FILE = path.join(DATA_DIR, 'pagamentos_func.json');
 
 function lerPagamentos() {
   try {
@@ -511,13 +633,14 @@ function lerPagamentos() {
     return JSON.parse(fs.readFileSync(PAGAMENTOS_FILE, 'utf8'));
   } catch { return []; }
 }
+
 function gravarPagamentos(data) {
   fs.writeFileSync(PAGAMENTOS_FILE, JSON.stringify(data, null, 2), 'utf8');
 }
 
 app.get('/api/pagamentos', (req, res) => res.json(lerPagamentos()));
 
-app.post('/api/pagamentos', express.json(), (req, res) => {
+app.post('/api/pagamentos', (req, res) => {
   const { funcionario, mes, tipoSalario, dias, valorDiaria, valorFixo } = req.body || {};
   if (!funcionario || !mes || !tipoSalario) return res.status(400).json({ erro: 'campos obrigatórios' });
   const records = lerPagamentos();
@@ -528,7 +651,7 @@ app.post('/api/pagamentos', express.json(), (req, res) => {
   res.json({ ok: true, record });
 });
 
-app.put('/api/pagamentos/:id', express.json(), (req, res) => {
+app.put('/api/pagamentos/:id', (req, res) => {
   const records = lerPagamentos();
   const idx = records.findIndex(r => r.id === req.params.id);
   if (idx === -1) return res.status(404).json({ erro: 'Não encontrado' });
@@ -537,7 +660,7 @@ app.put('/api/pagamentos/:id', express.json(), (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/pagamentos/duplicar-mes', express.json(), (req, res) => {
+app.post('/api/pagamentos/duplicar-mes', (req, res) => {
   const { mesFonte, mesDestino } = req.body || {};
   if (!mesFonte || !mesDestino) return res.status(400).json({ erro: 'mesFonte e mesDestino obrigatórios' });
   const records = lerPagamentos();
@@ -566,7 +689,7 @@ app.delete('/api/pagamentos/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/pagamentos/:id/adelanto', express.json(), (req, res) => {
+app.post('/api/pagamentos/:id/adelanto', (req, res) => {
   const { data, valor } = req.body || {};
   if (!data || !valor) return res.status(400).json({ erro: 'data e valor obrigatórios' });
   const records = lerPagamentos();
@@ -586,8 +709,8 @@ app.delete('/api/pagamentos/:id/adelanto/:adelId', (req, res) => {
   res.json({ ok: true });
 });
 
-// ── Instagram Posts ────────────────────────────────────
-const INSTAGRAM_FILE = path.join(BASE, '08_DOCUMENTOS', 'instagram_posts.json');
+// ── Instagram Posts ─────────────────────────────────────
+const INSTAGRAM_FILE = path.join(DATA_DIR, 'instagram_posts.json');
 
 function lerInstagram() {
   try {
@@ -602,7 +725,7 @@ function gravarInstagram(data) {
 
 app.get('/api/instagram', (req, res) => res.json(lerInstagram()));
 
-app.post('/api/instagram', express.json(), (req, res) => {
+app.post('/api/instagram', (req, res) => {
   const { data, descricao, tipo } = req.body || {};
   if (!data || !descricao || !tipo) return res.status(400).json({ erro: 'data, descricao e tipo obrigatórios' });
   const posts = lerInstagram();
@@ -619,6 +742,6 @@ app.delete('/api/instagram/:id', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log('\n  Dashboard Roble Fuerte rodando!');
+  console.log(`\n  Dashboard Roble Fuerte rodando!`);
   console.log(`  Abra no browser: http://localhost:${PORT}\n`);
 });
