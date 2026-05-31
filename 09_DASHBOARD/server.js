@@ -12,6 +12,19 @@ const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.join(__dirname, '..', '08_DOCUMENTOS');
 
+// Credenciais ficam FORA da pasta servida estaticamente (raiz do projeto).
+const CRED_PATH = process.env.GOOGLE_CREDENTIALS_PATH
+  ? path.resolve(process.env.GOOGLE_CREDENTIALS_PATH)
+  : path.join(__dirname, '..', 'google-credentials.json');
+
+// Defesa em profundidade: nunca servir ficheiros de credenciais pela web.
+app.use((req, res, next) => {
+  if (/(^|\/)(google-credentials\.json|.*\.json\.key)$/i.test(req.path)) {
+    return res.status(404).end();
+  }
+  next();
+});
+
 app.use(express.static(__dirname));
 app.use(express.json());
 
@@ -28,7 +41,7 @@ function getSheetsClient() {
   if (!_sheetsClient) {
     const creds = process.env.GOOGLE_CREDENTIALS
       ? JSON.parse(process.env.GOOGLE_CREDENTIALS)
-      : require('./google-credentials.json');
+      : require(CRED_PATH);
     const auth = new google.auth.GoogleAuth({
       credentials: creds,
       scopes: ['https://www.googleapis.com/auth/spreadsheets'],
@@ -142,6 +155,15 @@ function colToLetter(col) {
     col = Math.floor((col - 1) / 26);
   }
   return letter;
+}
+
+// Resolve `nome` dentro de `base`, bloqueando path traversal (../, %2F etc.).
+// Devolve o caminho absoluto seguro, ou null se escapar da pasta.
+function resolverDentro(base, nome) {
+  const baseRes = path.resolve(base);
+  const alvo    = path.resolve(baseRes, String(nome || ''));
+  if (alvo !== baseRes && !alvo.startsWith(baseRes + path.sep)) return null;
+  return alvo;
 }
 
 // ── Excel local (uploads de fechamento/extrato) ─────────
@@ -341,8 +363,8 @@ app.post('/api/upload', upload.single('arquivo'), (req, res) => {
 });
 
 app.get('/api/ler-upload/:nome', (req, res) => {
-  const arquivo = path.join(pastaUploads, req.params.nome);
-  if (!fs.existsSync(arquivo)) return res.status(404).json({ erro: 'Não encontrado' });
+  const arquivo = resolverDentro(pastaUploads, req.params.nome);
+  if (!arquivo || !fs.existsSync(arquivo)) return res.status(404).json({ erro: 'Não encontrado' });
   res.json(lerExcel(arquivo));
 });
 
@@ -391,14 +413,14 @@ app.get('/api/obra-docs', (req, res) => {
 });
 
 app.get('/api/obra-doc/:nome', (req, res) => {
-  const arquivo = path.join(pastaObras, req.params.nome);
-  if (!fs.existsSync(arquivo)) return res.status(404).json({ erro: 'Não encontrado' });
+  const arquivo = resolverDentro(pastaObras, req.params.nome);
+  if (!arquivo || !fs.existsSync(arquivo)) return res.status(404).json({ erro: 'Não encontrado' });
   res.sendFile(arquivo);
 });
 
 app.delete('/api/obra-doc/:nome', (req, res) => {
-  const arquivo = path.join(pastaObras, req.params.nome);
-  if (!fs.existsSync(arquivo)) return res.status(404).json({ erro: 'Não encontrado' });
+  const arquivo = resolverDentro(pastaObras, req.params.nome);
+  if (!arquivo || !fs.existsSync(arquivo)) return res.status(404).json({ erro: 'Não encontrado' });
   fs.unlinkSync(arquivo);
   res.json({ ok: true });
 });
